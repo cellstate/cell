@@ -55,10 +55,15 @@ A decentralized solution for replicating files across an distributed system usin
 
 - **Streamline Binary file distribution:** An important goal of
 the *Cellstate* project is to fully support (large) binary files. Git isn't specifically suited for this out of box so and would require custom merge strategies (see above) and a Bittorrent-like protocol to enable pulling large files from multiple sources simultaneously.
+
 - **Expose HTTP endpoint for webhooks:** It would be nice to edit your data right into Github and use webhooks to signal to the cluster that new data is available. This would also allow for a (more) persistent copy of the data to be always on renowned services like Bitbucket and GitHub.
+
 - **Tagging and Branches:** Not all data needs to be replicated to all nodes all the time, tagging nodes and bundle selection logic with certain data would allow carefully control over ressilience and speed.
+
 - **Events:** When new data is distributed throughout the system it is often required for running processes to parse the modified data. An event hook that triggers after new data is pulled to a node would allow for complex interactions with other software.
+
 - **Monitoring:** It can be challenging to analyse how data is distributed throughout the system, a specialysed monitoring service that uses the memberlist would make it easy to notice and debug (replication) errors.
+
 - **Using Git c-bindings:** Cellstate currently wraps the command line interface of Git, using the c-bindings would improve the performance
 
 
