@@ -1,6 +1,7 @@
 # Cellstate
 A decentralized solution for replicating files across an distributed system using [Git](http://git-scm.com/) and [Gossip](https://en.wikipedia.org/wiki/Gossip_protocol). It is specifically designed for high-latency networks of unstable nodes in which segmentation (P) is common, it chooses availability (A) over consistency (C). *Cellstate* aims to be easy to operate by shipping as a single [Docker](https://docker.com) container that can be deployed homogenously across all nodes in the system. New state is deployed from a workstation by using the familiar `git push` command.
 
+
 ## Getting Started
 *Cellstate* ships currently only ships as a Docker container so you'll need to have access to a [Docker host](https://docs.docker.com/installation/) and have a Git client installed (v1.8+).
 
