@@ -110,14 +110,14 @@ func replicateAction(c *cli.Context) {
 
 	//create directory and init repo if it doesn't exit yet!
 	repopath := string(filepath.Separator) + filepath.Join("opt", "git", filepath.Join(res...))
-	cmd := exec.Command("git", "fetch", remote, "master:master")
+	cmd := exec.Command("git", "fetch", remote)
 	if _, err := os.Stat(repopath); os.IsNotExist(err) {
 		err := os.MkdirAll(repopath, 0777)
 		if err != nil {
 			log.Printf("Failed to create directory path '%s': '%s'", repopath, err)
 		}
 
-		cmd = exec.Command("git", "clone", "--bare", remote, ".")
+		cmd = exec.Command("git", "clone", "--mirror", "--bare", remote, ".")
 	}
 
 	log.Printf("New commits at remote '%s', cloning to '%s'...", remote, repopath)
