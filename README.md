@@ -84,3 +84,7 @@ Other usefull links and articles:
 - [Gophers talking about hashes&syncing](https://groups.google.com/forum/#!topic/golang-nuts/ZiBcYH3Qw1g)
 - [camlistore, lfs& rollsum](https://github.com/github/git-lfs/issues/355)
 - [updating large Merkle Tree](http://crypto.stackexchange.com/questions/9198/efficient-incremental-updates-to-large-merkle-tree)
+
+On Dropbox inner workings:
+
+- [How Dropbox works](http://stackoverflow.com/questions/185533/how-does-the-dropbox-mac-client-work)
