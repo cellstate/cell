@@ -75,6 +75,7 @@ There are several interesting project in the space of decentralized data (replic
 - git lfs: [https://git-lfs.github.com/](https://git-lfs.github.com/)
 - bup: [https://github.com/bup/bup](https://github.com/bup/bup)
 - irmin [https://github.com/mirage/irmin](https://github.com/mirage/irmin)
+- camlistore [http://camlistore.org/](http://camlistore.org/)
 
 Other usefull links and articles:
 
