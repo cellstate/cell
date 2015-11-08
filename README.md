@@ -80,3 +80,4 @@ Other usefull links and articles:
 
 - [Why git is bad with large files& projects](http://stackoverflow.com/questions/17888604/git-with-large-files)
 - [Bup design document](https://raw.githubusercontent.com/bup/bup/master/DESIGN)
+- [Gophers talking about hashes&syncing](https://groups.google.com/forum/#!topic/golang-nuts/ZiBcYH3Qw1g)
