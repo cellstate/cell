@@ -67,4 +67,16 @@ the *Cellstate* project is to fully support (large) binary files. Git isn't spec
 
 - **Using Git c-bindings:** Cellstate currently wraps the command line interface of Git, using the c-bindings would improve the performance
 
+## Interesting Projects
+There are several interesting project in the space of decentralized data (replication)
 
+- IPFS: [https://ipfs.io/](https://ipfs.io/)
+- dat data: [http://dat-data.com/](http://dat-data.com/)
+- git lfs: [https://git-lfs.github.com/](https://git-lfs.github.com/)
+- bup: [https://github.com/bup/bup](https://github.com/bup/bup)
+- irmin [https://github.com/mirage/irmin](https://github.com/mirage/irmin)
+
+Other usefull links and articles:
+
+- [Why git is bad with large files& projects](http://stackoverflow.com/questions/17888604/git-with-large-files)
+- [Bup design document](https://raw.githubusercontent.com/bup/bup/master/DESIGN)
