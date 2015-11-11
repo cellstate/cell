@@ -83,6 +83,7 @@ Other usefull links and articles:
 - [Bup design document](https://raw.githubusercontent.com/bup/bup/master/DESIGN)
 - [Gophers talking about hashes&syncing](https://groups.google.com/forum/#!topic/golang-nuts/ZiBcYH3Qw1g)
 - [camlistore, lfs& rollsum](https://github.com/github/git-lfs/issues/355)
+- [keep, petabyte scale storage](https://dev.arvados.org/projects/arvados/wiki/Keep)
 - [updating large Merkle Tree](http://crypto.stackexchange.com/questions/9198/efficient-incremental-updates-to-large-merkle-tree)
 
 On Dropbox inner workings:
