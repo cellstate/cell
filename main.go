@@ -2,10 +2,8 @@ package main
 
 import (
 	"bytes"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"io/ioutil"
 	"log"
 	"net"
@@ -18,6 +16,8 @@ import (
 
 	"github.com/codegangsta/cli"
 	"golang.org/x/net/ipv4"
+
+	"github.com/cellstate/cell/services"
 )
 
 var ErrUserCancelled = errors.New("User cancelled")
@@ -135,15 +135,8 @@ func initNetworking(exit chan os.Signal, iface string) (net.IP, *net.Interface, 
 	return nil, nil, nil
 }
 
-func initSerf(ip net.IP) error {
-	cmd := exec.Command("serf", "agent", fmt.Sprintf("-bind=%s", ip))
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	return cmd.Start()
-}
-
 //we start listening for join multicast messages over udp
-func listenForGossipJoins(exit chan os.Signal, iface *net.Interface, group net.IP, ip net.IP) (*ipv4.PacketConn, error) {
+func listenForGossipJoins(exit chan os.Signal, serf services.Serf, iface *net.Interface, group net.IP, ip net.IP) (*ipv4.PacketConn, error) {
 	conn, err := net.ListenPacket("udp4", "0.0.0.0:1024")
 	if err != nil {
 		return nil, err
@@ -182,10 +175,7 @@ func listenForGossipJoins(exit chan os.Signal, iface *net.Interface, group net.I
 						continue
 					}
 
-					cmd := exec.Command("serf", "join", sip)
-					cmd.Stdout = os.Stdout
-					cmd.Stderr = os.Stderr
-					err = cmd.Run()
+					err = serf.Join(sip)
 					if err != nil {
 						log.Printf("Failed to join serf gossip at '%s': %s ", sip, err)
 					}
@@ -202,28 +192,12 @@ func listenForGossipJoins(exit chan os.Signal, iface *net.Interface, group net.I
 //multicast a tcp endpoint that hopefully receives that asks
 //other members of the network to come play, it will stop once
 //it knows of at least one member other than himself
-func multicastGossipJoinRequest(exit chan os.Signal, iface *net.Interface, group net.IP, ip net.IP, pconn *ipv4.PacketConn) error {
+func multicastGossipJoinRequest(exit chan os.Signal, serf services.Serf, iface *net.Interface, group net.IP, ip net.IP, pconn *ipv4.PacketConn) error {
 
 	for {
-		r, w := io.Pipe()
-		cmd := exec.Command("serf", "members", "-status=alive", "-format=json")
-		cmd.Stderr = os.Stderr
-		cmd.Stdout = w
-		err := cmd.Start()
+		members, err := serf.Members()
 		if err != nil {
-			return err
-		}
-
-		v := struct {
-			Members []struct {
-				Name string `json:"name`
-			} `json:"members"`
-		}{}
-
-		dec := json.NewDecoder(r)
-		err = dec.Decode(&v)
-		if err != nil {
-			log.Printf("Failed to contact serf daemon, retrying...")
+			log.Printf("Failed to rerieve members list, retrying...")
 			select {
 			case <-exit:
 				return ErrUserCancelled
@@ -232,11 +206,11 @@ func multicastGossipJoinRequest(exit chan os.Signal, iface *net.Interface, group
 			}
 		}
 
-		if len(v.Members) > 1 {
+		if len(members) > 1 {
 			break
 		}
 
-		log.Printf("Found only %d alive gossip member (itself), multicasting to find others...", len(v.Members))
+		log.Printf("Found only %d alive gossip member (itself), multicasting to find others...", len(members))
 		pconn.SetTOS(0x0)
 		pconn.SetTTL(16)
 		dst := &net.UDPAddr{IP: group, Port: 1024}
@@ -288,27 +262,57 @@ func joinAction(c *cli.Context) {
 		log.Fatalf("Failed to join network: %s", err)
 	}
 
+	//
+	// Gossip service
+	//
+	sconf := services.SerfConf{
+		Bind: ip.String(),
+	}
+
+	serf, err := services.NewSerf(sconf)
+	if err != nil {
+		log.Fatalf("Failed to create serf service: %s", err)
+	}
+
 	log.Printf("Joined network as member '%s', unicast available on '%s', starting serf...", member, ip.String())
-	err = initSerf(ip)
+	err = serf.Start()
 	if err != nil {
 		log.Fatalf("Failed to start serf: %s", err)
 	}
 
+	defer func() {
+		log.Fatalf("Stopping serf service...")
+		err := serf.Stop()
+		if err != nil {
+			log.Fatalf("Failed to stop serf: %s", err)
+		}
+	}()
+
+	//
+	// Gossip Discovery
+	//
+
 	group := net.ParseIP(c.String("group"))
 	log.Printf("Start listening for UDP gossip joins (multicast group '%s') on interface '%s'...", group, iface.Name)
-	pconn, err := listenForGossipJoins(exit, iface, group, ip)
+	pconn, err := listenForGossipJoins(exit, serf, iface, group, ip)
 	if err != nil {
 		log.Fatalf("Failed to start listening: %s", err)
 	}
 
 	log.Printf("Start multicasting request to join gossip...")
-	err = multicastGossipJoinRequest(exit, iface, group, ip, pconn)
+	err = multicastGossipJoinRequest(exit, serf, iface, group, ip, pconn)
 	if err != nil {
+		if err == ErrUserCancelled {
+			return
+		}
+
 		log.Fatalf("Failed to start multicasting: %s", err)
 	}
 
 	log.Printf("Gossip is up and running!")
+
 	<-exit
+	defer log.Println("Exited!")
 }
 
 func main() {
