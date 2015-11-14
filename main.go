@@ -2,8 +2,10 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"log"
 	"net"
@@ -133,47 +135,108 @@ func initNetworking(exit chan os.Signal, iface string) (net.IP, *net.Interface, 
 	return nil, nil, nil
 }
 
+func initSerf(ip net.IP) error {
+	cmd := exec.Command("serf", "agent", fmt.Sprintf("-bind=%s", ip))
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Start()
+}
+
 //we start listening for join multicast messages over udp
-func listenForGossipJoins(exit chan os.Signal, iface *net.Interface) error {
-	group := net.IPv4(224, 0, 0, 250)
+func listenForGossipJoins(exit chan os.Signal, iface *net.Interface, group net.IP, ip net.IP) (*ipv4.PacketConn, error) {
 	conn, err := net.ListenPacket("udp4", "0.0.0.0:1024")
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	pconn := ipv4.NewPacketConn(conn)
 	if err := pconn.JoinGroup(iface, &net.UDPAddr{IP: group}); err != nil {
-		return err
+		conn.Close()
+		return nil, err
 	}
 
 	if err := pconn.SetControlMessage(ipv4.FlagDst, true); err != nil {
-		return err
+		conn.Close()
+		return nil, err
 	}
 
 	go func() {
 		defer conn.Close()
+
 		b := make([]byte, 1500)
 		for {
-			n, cm, src, err := pconn.ReadFrom(b)
-			log.Printf("read n: %d, cm: %s, src: %v, err: %s", n, cm, src, err)
+			_, cm, src, err := pconn.ReadFrom(b)
+			if err != nil {
+				log.Printf("Failed to read packet: %s", err)
+				continue
+			}
+
 			if cm.Dst.IsMulticast() {
 				if cm.Dst.Equal(group) {
-					log.Println("Joined group")
+					sip, _, err := net.SplitHostPort(src.String())
+					if err != nil {
+						log.Printf("Multicast src '%s' has unexpected format: %s", src, err)
+					}
+
+					if sip == ip.String() {
+						continue
+					}
+
+					cmd := exec.Command("serf", "join", sip)
+					cmd.Stdout = os.Stdout
+					cmd.Stderr = os.Stderr
+					err = cmd.Run()
+					if err != nil {
+						log.Printf("Failed to join serf gossip at '%s': %s ", sip, err)
+					}
 				} else {
-					log.Println("Unkown group")
 					continue
 				}
 			}
 		}
 	}()
 
+	return pconn, nil
+}
+
+//multicast a tcp endpoint that hopefully receives that asks
+//other members of the network to come play, it will stop once
+//it knows of at least one member other than himself
+func multicastGossipJoinRequest(exit chan os.Signal, iface *net.Interface, group net.IP, ip net.IP, pconn *ipv4.PacketConn) error {
+
 	for {
-		select {
-		case <-exit:
-			return ErrUserCancelled
-		case <-time.After(time.Second):
+		r, w := io.Pipe()
+		cmd := exec.Command("serf", "members", "-status=alive", "-format=json")
+		cmd.Stderr = os.Stderr
+		cmd.Stdout = w
+		err := cmd.Start()
+		if err != nil {
+			return err
 		}
 
+		v := struct {
+			Members []struct {
+				Name string `json:"name`
+			} `json:"members"`
+		}{}
+
+		dec := json.NewDecoder(r)
+		err = dec.Decode(&v)
+		if err != nil {
+			log.Printf("Failed to contact serf daemon, retrying...")
+			select {
+			case <-exit:
+				return ErrUserCancelled
+			case <-time.After(time.Second * 2):
+				continue
+			}
+		}
+
+		if len(v.Members) > 1 {
+			break
+		}
+
+		log.Printf("Found only %d alive gossip member (itself), multicasting to find others...", len(v.Members))
 		pconn.SetTOS(0x0)
 		pconn.SetTTL(16)
 		dst := &net.UDPAddr{IP: group, Port: 1024}
@@ -182,17 +245,16 @@ func listenForGossipJoins(exit chan os.Signal, iface *net.Interface) error {
 		}
 
 		pconn.SetMulticastTTL(2)
-		if _, err := pconn.WriteTo([]byte("abc"), nil, dst); err != nil {
+		if _, err := pconn.WriteTo([]byte{}, nil, dst); err != nil {
 			return err
 		}
 
+		select {
+		case <-exit:
+			return ErrUserCancelled
+		case <-time.After(time.Second * 10):
+		}
 	}
-
-	return nil
-}
-
-//we start broadcasting for a gossip to join
-func broadcastGossipJoinRequest() error {
 
 	return nil
 }
@@ -226,19 +288,26 @@ func joinAction(c *cli.Context) {
 		log.Fatalf("Failed to join network: %s", err)
 	}
 
-	log.Printf("Joined network as member '%s' reachable on ip '%s'", member, ip.String())
-	log.Printf("Start listening for UDP gossip joins on interface '%s'...", iface.Name)
-	err = listenForGossipJoins(exit, iface)
+	log.Printf("Joined network as member '%s', unicast available on '%s', starting serf...", member, ip.String())
+	err = initSerf(ip)
+	if err != nil {
+		log.Fatalf("Failed to start serf: %s", err)
+	}
+
+	group := net.ParseIP(c.String("group"))
+	log.Printf("Start listening for UDP gossip joins (multicast group '%s') on interface '%s'...", group, iface.Name)
+	pconn, err := listenForGossipJoins(exit, iface, group, ip)
 	if err != nil {
 		log.Fatalf("Failed to start listening: %s", err)
 	}
 
-	log.Printf("Start broadcasting request to join gossip...")
-	err = broadcastGossipJoinRequest()
+	log.Printf("Start multicasting request to join gossip...")
+	err = multicastGossipJoinRequest(exit, iface, group, ip, pconn)
 	if err != nil {
-		log.Fatalf("Failed to start broadcasting: %s", err)
+		log.Fatalf("Failed to start multicasting: %s", err)
 	}
 
+	log.Printf("Gossip is up and running!")
 	<-exit
 }
 
@@ -257,6 +326,7 @@ func main() {
 			Action: joinAction,
 			Flags: []cli.Flag{
 				cli.StringFlag{Name: "interface,i", Value: "zt0", Usage: "..."},
+				cli.StringFlag{Name: "group,g", Value: "224.0.0.250", Usage: "..."},
 			},
 		},
 	}
