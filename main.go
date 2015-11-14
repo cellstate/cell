@@ -1,172 +1,135 @@
 package main
 
 import (
+	"bytes"
+	"errors"
 	"fmt"
 	"io/ioutil"
 	"log"
 	"net"
-	"net/http"
-	"net/http/cgi"
-	"net/url"
 	"os"
 	"os/exec"
-	"path/filepath"
-	"strings"
+	"os/signal"
+	"time"
 
 	"github.com/codegangsta/cli"
 )
 
-type AutoCreator struct {
-	cgih *cgi.Handler
-}
+var ErrUserCancelled = errors.New("User cancelled")
 
-func (ac *AutoCreator) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	parts := strings.Split(r.URL.Path, "/")
-	res := []string{}
-	for _, p := range parts {
-		res = append(res, p)
-		if strings.HasSuffix(p, ".git") {
-			break
-		}
-	}
+// start the vpn client and
+// estabilish an connection
+func initVPN(exit chan os.Signal, network string) (string, error) {
 
-	//create directory and init repo if it doesn't exit yet
-	repopath := string(filepath.Separator) + filepath.Join("opt", "git", filepath.Join(res...))
-	if _, err := os.Stat(repopath); os.IsNotExist(err) {
-
-		err := os.MkdirAll(repopath, 0777)
-		if err != nil {
-			log.Printf("Failed to create directory path '%s': '%s'", repopath, err)
-		}
-
-		cmd := exec.Command("git", "--bare", "init")
-		cmd.Dir = repopath
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		err = cmd.Run()
-		if err != nil {
-			log.Printf("Failed init bare repo: '%s'", err)
-		}
-	}
-
-	ac.cgih.ServeHTTP(w, r)
-	if r.Method == "POST" && strings.HasSuffix(r.URL.Path, "git-receive-pack") {
-		log.Printf("Detected new git commits: %s %s, emitting event...", r.Method, r.URL.String())
-
-		//get ip addr
-		iface, err := net.InterfaceByName("eth0")
-		if err != nil {
-			log.Printf("Failed to get interface with name 'eth0': '%s'", err)
-		}
-
-		addrs, err := iface.Addrs()
-		if err != nil {
-			log.Printf("Failed to get interface addrs: '%s'", err)
-		}
-
-		cidr := addrs[0].String()
-		ip, _, err := net.ParseCIDR(cidr)
-		if err != nil {
-			log.Fatalf("Failed to parse '%s' as CIDR: %s", cidr, err)
-		}
-
-		loc := &url.URL{}
-		loc.Scheme = "http"
-		loc.Host = fmt.Sprintf("%s:%s", ip.String(), "3838")
-		loc.Path = strings.Join(res, "/")
-
-		//emit actual event
-		cmd := exec.Command("serf", "event", "new-commits", loc.String())
-		cmd.Dir = repopath
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		err = cmd.Run()
-		if err != nil {
-			log.Printf("Failed emit serf event: '%s'", err)
-		}
-	}
-}
-
-func replicateAction(c *cli.Context) {
-	data, err := ioutil.ReadAll(os.Stdin)
-	if err != nil {
-		log.Fatalf("Failed to read stdin for src address: '%s'", err)
-	}
-
-	remote := strings.TrimSpace(string(data))
-	loc, err := url.Parse(remote)
-	if err != nil {
-		log.Fatalf("Failed to parse input '%s' as url: %s", data, err)
-	}
-
-	parts := strings.Split(loc.Path, "/")
-	res := []string{}
-	for _, p := range parts {
-		res = append(res, p)
-		if strings.HasSuffix(p, ".git") {
-			break
-		}
-	}
-
-	//create directory and init repo if it doesn't exit yet!
-	repopath := string(filepath.Separator) + filepath.Join("opt", "git", filepath.Join(res...))
-	cmd := exec.Command("git", "fetch", remote)
-	if _, err := os.Stat(repopath); os.IsNotExist(err) {
-		err := os.MkdirAll(repopath, 0777)
-		if err != nil {
-			log.Printf("Failed to create directory path '%s': '%s'", repopath, err)
-		}
-
-		cmd = exec.Command("git", "clone", "--mirror", "--bare", remote, ".")
-	}
-
-	log.Printf("New commits at remote '%s', cloning to '%s'...", remote, repopath)
-	cmd.Dir = repopath
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	err = cmd.Run()
-	if err != nil {
-		log.Printf("Failed to clone from '%s': '%s'", remote, err)
-	}
-}
-
-func agentAction(c *cli.Context) {
-	log.Println("Starting agent...")
-
-	h := &cgi.Handler{
-		Path: "/usr/lib/git-core/git-http-backend",
-		Root: "/git/",
-		Env:  []string{"GIT_PROJECT_ROOT=/opt/git", "GIT_HTTP_EXPORT_ALL=1", "REMOTE_USER=cell"},
-	}
-
-	//start serf agent
-	cmd := exec.Command("serf", "agent", "-log-level=debug", "-event-handler", "user:new-commits=cell replicate")
+	//start zerotier service
+	cmd := exec.Command("/var/lib/zerotier-one/zerotier-one")
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	err := cmd.Start()
 	if err != nil {
-		log.Printf("Failed to start serf agent: '%s'", err)
+		return "", err
 	}
 
-	//want to join
-	if remote := c.String("join"); remote != "" {
-		log.Printf("Joining gossip via '%s...", remote)
+	member := ""
+	for {
+		data, err := ioutil.ReadFile("/var/lib/zerotier-one/identity.public")
+		if os.IsNotExist(err) {
+			select {
+			case <-exit:
+				return member, ErrUserCancelled
+			case <-time.After(time.Second):
+			}
+		} else if err != nil {
+			return member, err
+		} else {
+			parts := bytes.SplitN(data, []byte(":"), 2)
+			if len(parts) < 2 {
+				return member, fmt.Errorf("Unexpected identity file content: %s", data)
+			}
 
-		cmd := exec.Command("serf", "join", remote)
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		err := cmd.Run()
-		if err != nil {
-			log.Printf("Failed to join gossip: '%s'", err)
+			member = string(parts[0])
+			break
 		}
 	}
 
-	//start http server
-	log.Println("HTTP server listening on ':3838'...")
-	err = http.ListenAndServe(":3838", &AutoCreator{h})
+	//start and join zerotier network
+	cmd = exec.Command("zerotier-cli", "join", network)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	err = cmd.Start()
 	if err != nil {
-		log.Fatal(err)
+		return member, err
 	}
+
+	return member, nil
+}
+
+// wait for a network address beinn assigned to
+// the vpn iterface
+func initNetworking(exit chan os.Signal, iface string) (net.IP, error) {
+	for {
+		ifaces, err := net.Interfaces()
+		if err != nil {
+			return nil, err
+		}
+
+		for _, i := range ifaces {
+			if i.Name == iface {
+				addrs, err := i.Addrs()
+				if err != nil {
+					return nil, err
+				}
+
+				if len(addrs) > 0 {
+					ip, _, err := net.ParseCIDR(addrs[0].String())
+					if err != nil {
+						return nil, err
+					}
+
+					if ip.To4() != nil {
+						return ip, nil
+					}
+				}
+			}
+		}
+
+		select {
+		case <-exit:
+			return nil, ErrUserCancelled
+		case <-time.After(time.Second):
+		}
+
+	}
+
+	return nil, nil
+}
+
+func joinAction(c *cli.Context) {
+	network := c.Args().First()
+	if network == "" {
+		log.Fatalf("Failed, Please provide the network ID to join as the first argument")
+	}
+
+	exit := make(chan os.Signal)
+	signal.Notify(exit, os.Interrupt, os.Kill)
+
+	log.Printf("Joining network '%s' and waiting for identity...", network)
+	member, err := initVPN(exit, network)
+	if err != nil {
+		log.Fatalf("Failed to join network: %s", err)
+	}
+
+	log.Printf("Waiting for network authorization and ip address...")
+	ip, err := initNetworking(exit, c.String("interface"))
+	if err != nil {
+		log.Fatalf("Failed to join network: %s", err)
+	}
+
+	log.Printf("Joined network as member '%s' reachable on ip '%s'", member, ip.String())
+
+	//@todo wait for ip address
+
 }
 
 func main() {
@@ -175,18 +138,12 @@ func main() {
 	app.Usage = "make an explosive entrance"
 	app.Commands = []cli.Command{
 		{
-			Name:   "agent",
+			Name:   "join",
 			Usage:  "...",
-			Action: agentAction,
+			Action: joinAction,
 			Flags: []cli.Flag{
-				cli.StringFlag{Name: "join", Usage: "..."},
+				cli.StringFlag{Name: "interface,i", Value: "zt0", Usage: "..."},
 			},
-		},
-		{
-			Name:   "replicate",
-			Usage:  "...",
-			Action: replicateAction,
-			Flags:  []cli.Flag{},
 		},
 	}
 
