@@ -58,6 +58,7 @@ func (z *zeroProcess) Start() (string, error) {
 	return member, nil
 }
 
+//@todo can we get the iface name from the network join?
 func (z *zeroProcess) Join(network, iface string, cancel chan os.Signal) (net.IP, *net.Interface, error) {
 	cmd := exec.Command("zerotier-cli", "join", network)
 	cmd.Stdout = os.Stdout

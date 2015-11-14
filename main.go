@@ -2,18 +2,16 @@ package main
 
 import (
 	"errors"
-	"fmt"
 	"log"
 	"net"
-	"net/http"
 	"os"
 	"os/signal"
-	"strings"
 	"time"
 
 	"github.com/codegangsta/cli"
 	"golang.org/x/net/ipv4"
 
+	"github.com/cellstate/cell/clients/zerotier"
 	"github.com/cellstate/cell/services"
 )
 
@@ -59,28 +57,28 @@ var ErrUserCancelled = errors.New("User cancelled")
 
 //with a zerotier access token it is possible
 //to authorize this member automatically through the api
-func authMember(token, network, member string) error {
+// func authMember(token, network, member string) error {
 
-	loc := fmt.Sprintf("https://my.zerotier.com/api/network/%s/member/%s", network, member)
-	req, err := http.NewRequest("POST", loc, strings.NewReader(fmt.Sprintf(`{"config":{"authorized": true}, "annot": {"description": "joined %s"}}`, time.Now().Format("02-01-2006 (15:04)"))))
-	if err != nil {
-		return fmt.Errorf("Failed to create request: %s", err)
-	}
+// 	loc := fmt.Sprintf("https://my.zerotier.com/api/network/%s/member/%s", network, member)
+// 	req, err := http.NewRequest("POST", loc, strings.NewReader(fmt.Sprintf(`{"config":{"authorized": true}, "annot": {"description": "joined %s"}}`, time.Now().Format("02-01-2006 (15:04)"))))
+// 	if err != nil {
+// 		return fmt.Errorf("Failed to create request: %s", err)
+// 	}
 
-	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", token))
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return err
-	}
+// 	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", token))
+// 	req.Header.Set("Content-Type", "application/json")
+// 	resp, err := http.DefaultClient.Do(req)
+// 	if err != nil {
+// 		return err
+// 	}
 
-	defer resp.Body.Close()
-	if resp.StatusCode > 299 {
-		return fmt.Errorf("Failed to update member details '%v': %s", req.Header, resp.Status)
-	}
+// 	defer resp.Body.Close()
+// 	if resp.StatusCode > 299 {
+// 		return fmt.Errorf("Failed to update member details '%v': %s", req.Header, resp.Status)
+// 	}
 
-	return nil
-}
+// 	return nil
+// }
 
 // wait for a network address beinn assigned to
 // the vpn iterface
@@ -240,6 +238,16 @@ func joinAction(c *cli.Context) {
 	signal.Notify(exit, os.Interrupt, os.Kill)
 	defer log.Println("Exited!")
 
+	var err error
+	var zeroc *zerotier.Client
+	token := c.GlobalString("token")
+	if token != "" {
+		zeroc, err = zerotier.NewClient(token)
+		if err != nil {
+			log.Fatalf("Failed to create zerotier http client with token '%s'", token)
+		}
+	}
+
 	//
 	// ZeroTier service
 	//
@@ -263,9 +271,9 @@ func joinAction(c *cli.Context) {
 		}
 	}()
 
-	if c.GlobalString("token") != "" {
-		log.Printf("Saw zerotier token '%s', authorizing itself...", c.GlobalString("token"))
-		err = authMember(c.GlobalString("token"), network, member)
+	if zeroc != nil {
+		log.Printf("Have access to zerotier api, authorizing ourself (member '%s')...", member)
+		err := zeroc.AuthorizeMember(network, member)
 		if err != nil {
 			log.Printf("Warning: Failed to authorize itself: '%s'. You might need to authorize member '%s' manually", err, member)
 		}
