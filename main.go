@@ -1,15 +1,12 @@
 package main
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
-	"io/ioutil"
 	"log"
 	"net"
 	"net/http"
 	"os"
-	"os/exec"
 	"os/signal"
 	"strings"
 	"time"
@@ -24,51 +21,41 @@ var ErrUserCancelled = errors.New("User cancelled")
 
 // start the vpn client and
 // estabilish an connection
-func initVPN(exit chan os.Signal, network string) (string, error) {
+// func initVPN(exit chan os.Signal) (string, error) {
 
-	//start zerotier service
-	cmd := exec.Command("/var/lib/zerotier-one/zerotier-one")
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	err := cmd.Start()
-	if err != nil {
-		return "", err
-	}
+// 	//start zerotier service
+// 	cmd := exec.Command("/var/lib/zerotier-one/zerotier-one")
+// 	cmd.Stdout = os.Stdout
+// 	cmd.Stderr = os.Stderr
+// 	err := cmd.Start()
+// 	if err != nil {
+// 		return "", err
+// 	}
 
-	member := ""
-	for {
-		data, err := ioutil.ReadFile("/var/lib/zerotier-one/identity.public")
-		if os.IsNotExist(err) {
-			select {
-			case <-exit:
-				return member, ErrUserCancelled
-			case <-time.After(time.Second):
-			}
-		} else if err != nil {
-			return member, err
-		} else {
-			parts := bytes.SplitN(data, []byte(":"), 2)
-			if len(parts) < 2 {
-				return member, fmt.Errorf("Unexpected identity file content: %s", data)
-			}
+// 	member := ""
+// 	for {
+// 		data, err := ioutil.ReadFile("/var/lib/zerotier-one/identity.public")
+// 		if os.IsNotExist(err) {
+// 			select {
+// 			case <-exit:
+// 				return member, ErrUserCancelled
+// 			case <-time.After(time.Second):
+// 			}
+// 		} else if err != nil {
+// 			return member, err
+// 		} else {
+// 			parts := bytes.SplitN(data, []byte(":"), 2)
+// 			if len(parts) < 2 {
+// 				return member, fmt.Errorf("Unexpected identity file content: %s", data)
+// 			}
 
-			member = string(parts[0])
-			break
-		}
-	}
+// 			member = string(parts[0])
+// 			break
+// 		}
+// 	}
 
-	//start and join zerotier network
-	cmd = exec.Command("zerotier-cli", "join", network)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-
-	err = cmd.Start()
-	if err != nil {
-		return member, err
-	}
-
-	return member, nil
-}
+// 	return member, nil
+// }
 
 //with a zerotier access token it is possible
 //to authorize this member automatically through the api
@@ -97,43 +84,53 @@ func authMember(token, network, member string) error {
 
 // wait for a network address beinn assigned to
 // the vpn iterface
-func initNetworking(exit chan os.Signal, iface string) (net.IP, *net.Interface, error) {
-	for {
-		ifaces, err := net.Interfaces()
-		if err != nil {
-			return nil, nil, err
-		}
+// func initNetworking(exit chan os.Signal, iface string, network string) (net.IP, *net.Interface, error) {
 
-		for _, i := range ifaces {
-			if i.Name == iface {
-				addrs, err := i.Addrs()
-				if err != nil {
-					return nil, nil, err
-				}
+// 	cmd := exec.Command("zerotier-cli", "join", network)
+// 	cmd.Stdout = os.Stdout
+// 	cmd.Stderr = os.Stderr
 
-				if len(addrs) > 0 {
-					ip, _, err := net.ParseCIDR(addrs[0].String())
-					if err != nil {
-						return nil, nil, err
-					}
+// 	err := cmd.Start()
+// 	if err != nil {
+// 		return nil, nil, err
+// 	}
 
-					if ip.To4() != nil {
-						return ip, &i, nil
-					}
-				}
-			}
-		}
+// 	for {
+// 		ifaces, err := net.Interfaces()
+// 		if err != nil {
+// 			return nil, nil, err
+// 		}
 
-		select {
-		case <-exit:
-			return nil, nil, ErrUserCancelled
-		case <-time.After(time.Second):
-		}
+// 		for _, i := range ifaces {
+// 			if i.Name == iface {
+// 				addrs, err := i.Addrs()
+// 				if err != nil {
+// 					return nil, nil, err
+// 				}
 
-	}
+// 				if len(addrs) > 0 {
+// 					ip, _, err := net.ParseCIDR(addrs[0].String())
+// 					if err != nil {
+// 						return nil, nil, err
+// 					}
 
-	return nil, nil, nil
-}
+// 					if ip.To4() != nil {
+// 						return ip, &i, nil
+// 					}
+// 				}
+// 			}
+// 		}
+
+// 		select {
+// 		case <-exit:
+// 			return nil, nil, ErrUserCancelled
+// 		case <-time.After(time.Second):
+// 		}
+
+// 	}
+
+// 	return nil, nil, nil
+// }
 
 //we start listening for join multicast messages over udp
 func listenForGossipJoins(exit chan os.Signal, serf services.Serf, iface *net.Interface, group net.IP, ip net.IP) (*ipv4.PacketConn, error) {
@@ -241,12 +238,30 @@ func joinAction(c *cli.Context) {
 
 	exit := make(chan os.Signal)
 	signal.Notify(exit, os.Interrupt, os.Kill)
+	defer log.Println("Exited!")
 
-	log.Printf("Joining network '%s' and waiting for identity...", network)
-	member, err := initVPN(exit, network)
+	//
+	// ZeroTier service
+	//
+
+	ztier, err := services.NewZeroTier()
+	if err != nil {
+		log.Fatalf("Failed to create zerotier service: %s", err)
+	}
+
+	log.Printf("Starting zerotier and waiting for identity...")
+	member, err := ztier.Start()
 	if err != nil {
 		log.Fatalf("Failed to join network: %s", err)
 	}
+
+	defer func() {
+		log.Printf("Stopping ZeroTier service...")
+		err := ztier.Stop()
+		if err != nil {
+			log.Fatalf("Failed to stop zerotier: %s", err)
+		}
+	}()
 
 	if c.GlobalString("token") != "" {
 		log.Printf("Saw zerotier token '%s', authorizing itself...", c.GlobalString("token"))
@@ -256,9 +271,13 @@ func joinAction(c *cli.Context) {
 		}
 	}
 
-	log.Printf("Waiting for network authorization and/or ip address...")
-	ip, iface, err := initNetworking(exit, c.String("interface"))
+	log.Printf("Joining network '%s' and waiting for ip address...", network)
+	ip, iface, err := ztier.Join(network, c.String("interface"), exit)
 	if err != nil {
+		if err == services.ErrUserCancelled {
+			return
+		}
+
 		log.Fatalf("Failed to join network: %s", err)
 	}
 
@@ -281,7 +300,7 @@ func joinAction(c *cli.Context) {
 	}
 
 	defer func() {
-		log.Fatalf("Stopping serf service...")
+		log.Printf("Stopping serf service...")
 		err := serf.Stop()
 		if err != nil {
 			log.Fatalf("Failed to stop serf: %s", err)
@@ -312,7 +331,6 @@ func joinAction(c *cli.Context) {
 	log.Printf("Gossip is up and running!")
 
 	<-exit
-	defer log.Println("Exited!")
 }
 
 func main() {

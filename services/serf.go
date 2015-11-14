@@ -47,6 +47,7 @@ func (s *serfProcess) Start() error {
 		return err
 	}
 
+	//@todo wait for output to container certain string
 	s.Process = cmd.Process
 	return nil
 }
@@ -85,7 +86,8 @@ func (s *serfProcess) Members() ([]*Member, error) {
 }
 
 func (s *serfProcess) Stop() error {
-	s.Process.Kill()
+	//@todo cause a gracefull leave instead
+	s.Process.Signal(os.Interrupt)
 
 	_, err := s.Process.Wait()
 	if err != nil {
