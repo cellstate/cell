@@ -26,6 +26,7 @@ func NewSerfDiscovery(serf Serf, iface *net.Interface, group net.IP, self net.IP
 	}, nil
 }
 
+//a discovery system for serf
 type serfDiscovery struct {
 	iface *net.Interface
 	group net.IP

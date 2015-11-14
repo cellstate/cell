@@ -86,8 +86,11 @@ func (s *serfProcess) Members() ([]*Member, error) {
 }
 
 func (s *serfProcess) Stop() error {
-	//@todo cause a gracefull leave instead
-	s.Process.Signal(os.Interrupt)
+	//@todo figure out how the serf process
+	//receives the main routines interrupt
+	//figure out how gracefull leaves and zerotier stop
+	//working, is zerotier being stopped automatically as well?
+	// s.Process.Signal(os.Interrupt)
 
 	_, err := s.Process.Wait()
 	if err != nil {
