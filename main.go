@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/codegangsta/cli"
+	"golang.org/x/net/ipv4"
 )
 
 var ErrUserCancelled = errors.New("User cancelled")
@@ -94,28 +95,28 @@ func authMember(token, network, member string) error {
 
 // wait for a network address beinn assigned to
 // the vpn iterface
-func initNetworking(exit chan os.Signal, iface string) (net.IP, error) {
+func initNetworking(exit chan os.Signal, iface string) (net.IP, *net.Interface, error) {
 	for {
 		ifaces, err := net.Interfaces()
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 
 		for _, i := range ifaces {
 			if i.Name == iface {
 				addrs, err := i.Addrs()
 				if err != nil {
-					return nil, err
+					return nil, nil, err
 				}
 
 				if len(addrs) > 0 {
 					ip, _, err := net.ParseCIDR(addrs[0].String())
 					if err != nil {
-						return nil, err
+						return nil, nil, err
 					}
 
 					if ip.To4() != nil {
-						return ip, nil
+						return ip, &i, nil
 					}
 				}
 			}
@@ -123,13 +124,77 @@ func initNetworking(exit chan os.Signal, iface string) (net.IP, error) {
 
 		select {
 		case <-exit:
-			return nil, ErrUserCancelled
+			return nil, nil, ErrUserCancelled
 		case <-time.After(time.Second):
 		}
 
 	}
 
-	return nil, nil
+	return nil, nil, nil
+}
+
+//we start listening for join multicast messages over udp
+func listenForGossipJoins(exit chan os.Signal, iface *net.Interface) error {
+	group := net.IPv4(224, 0, 0, 250)
+	conn, err := net.ListenPacket("udp4", "0.0.0.0:1024")
+	if err != nil {
+		return err
+	}
+
+	pconn := ipv4.NewPacketConn(conn)
+	if err := pconn.JoinGroup(iface, &net.UDPAddr{IP: group}); err != nil {
+		return err
+	}
+
+	if err := pconn.SetControlMessage(ipv4.FlagDst, true); err != nil {
+		return err
+	}
+
+	go func() {
+		defer conn.Close()
+		b := make([]byte, 1500)
+		for {
+			n, cm, src, err := pconn.ReadFrom(b)
+			log.Printf("read n: %d, cm: %s, src: %v, err: %s", n, cm, src, err)
+			if cm.Dst.IsMulticast() {
+				if cm.Dst.Equal(group) {
+					log.Println("Joined group")
+				} else {
+					log.Println("Unkown group")
+					continue
+				}
+			}
+		}
+	}()
+
+	for {
+		select {
+		case <-exit:
+			return ErrUserCancelled
+		case <-time.After(time.Second):
+		}
+
+		pconn.SetTOS(0x0)
+		pconn.SetTTL(16)
+		dst := &net.UDPAddr{IP: group, Port: 1024}
+		if err := pconn.SetMulticastInterface(iface); err != nil {
+			return err
+		}
+
+		pconn.SetMulticastTTL(2)
+		if _, err := pconn.WriteTo([]byte("abc"), nil, dst); err != nil {
+			return err
+		}
+
+	}
+
+	return nil
+}
+
+//we start broadcasting for a gossip to join
+func broadcastGossipJoinRequest() error {
+
+	return nil
 }
 
 func joinAction(c *cli.Context) {
@@ -156,13 +221,25 @@ func joinAction(c *cli.Context) {
 	}
 
 	log.Printf("Waiting for network authorization and/or ip address...")
-	ip, err := initNetworking(exit, c.String("interface"))
+	ip, iface, err := initNetworking(exit, c.String("interface"))
 	if err != nil {
 		log.Fatalf("Failed to join network: %s", err)
 	}
 
 	log.Printf("Joined network as member '%s' reachable on ip '%s'", member, ip.String())
-	//@todo try to join gossip
+	log.Printf("Start listening for UDP gossip joins on interface '%s'...", iface.Name)
+	err = listenForGossipJoins(exit, iface)
+	if err != nil {
+		log.Fatalf("Failed to start listening: %s", err)
+	}
+
+	log.Printf("Start broadcasting request to join gossip...")
+	err = broadcastGossipJoinRequest()
+	if err != nil {
+		log.Fatalf("Failed to start broadcasting: %s", err)
+	}
+
+	<-exit
 }
 
 func main() {
