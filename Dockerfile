@@ -8,6 +8,9 @@ ENV GOPATH $HOME/gopath
 ENV PATH $PATH:/usr/local/go/bin:$GOPATH/bin
 ENV GO15VENDOREXPERIMENT 1
 
+#install deluge 
+RUN apt-get install -y software-properties-common; sudo add-apt-repository ppa:deluge-team/ppa; apt-get update; apt-get install -y deluged deluge-console;
+
 #installing zerotier
 RUN curl -L https://download.zerotier.com/dist/zerotier-one_1.0.5_amd64.deb > /tmp/ztier.deb; dpkg -i /tmp/ztier.deb; rm /tmp/ztier.deb
 

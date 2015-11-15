@@ -16,7 +16,7 @@ type Discovery interface {
 	FindAny(cancel chan os.Signal) error
 }
 
-func NewSerfDiscovery(serf Serf, iface *net.Interface, group net.IP, self net.IP) (Discovery, error) {
+func NewSerfDiscovery(serf Gossip, iface *net.Interface, group net.IP, self net.IP) (Discovery, error) {
 	return &serfDiscovery{
 		iface: iface,
 		serf:  serf,
@@ -32,7 +32,7 @@ type serfDiscovery struct {
 	group net.IP
 	self  net.IP
 	pconn *ipv4.PacketConn
-	serf  Serf
+	serf  Gossip
 	stop  chan struct{}
 }
 

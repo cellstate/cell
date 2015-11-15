@@ -10,11 +10,11 @@ import (
 	"time"
 )
 
-func NewZeroTier() (ZeroTier, error) {
+func NewZeroTier() (VPN, error) {
 	return &zeroProcess{}, nil
 }
 
-type ZeroTier interface {
+type VPN interface {
 	Start() (memberID string, err error)
 	Join(network, iface string, cancel chan os.Signal) (net.IP, *net.Interface, error)
 	Stop() error
@@ -107,8 +107,6 @@ func (z *zeroProcess) Join(network, iface string, cancel chan os.Signal) (net.IP
 }
 
 func (z *zeroProcess) Stop() error {
-	z.Process.Signal(os.Interrupt)
-
 	_, err := z.Process.Wait()
 	if err != nil {
 		return err

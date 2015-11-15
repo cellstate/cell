@@ -8,13 +8,13 @@ import (
 	"os/exec"
 )
 
-func NewSerf(conf SerfConf) (Serf, error) {
+func NewSerf(conf SerfConf) (Gossip, error) {
 	return &serfProcess{
 		conf: conf,
 	}, nil
 }
 
-type Serf interface {
+type Gossip interface {
 	Start() error
 	Stop() error
 	Join(addr string) error

@@ -86,6 +86,31 @@ Other usefull links and articles:
 - [keep, petabyte scale storage](https://dev.arvados.org/projects/arvados/wiki/Keep)
 - [updating large Merkle Tree](http://crypto.stackexchange.com/questions/9198/efficient-incremental-updates-to-large-merkle-tree)
 
-On Dropbox inner workings:
+In the realm of decentralized file syncing:
+
+- [Syncthing](https://syncthing.net/) on conflict: create two files, protocol: block exchange protocal (BEP)
+- [Bittorrent Sync](https://en.wikipedia.org/wiki/BitTorrent_Sync): on conflict: has some notion of "latest" and places overwritten files in a "archive", protocol: Micro Transport Protocol (uTP)
+
+On the uTP (micro transport protocol):
+
+- [Official Blog Post](http://blog.bittorrent.com/2009/11/13/testing-%C2%B5tp-is-%C2%B5tp-actually-faster-than-regular-bittorrent/)
+- [Ars Tech](http://arstechnica.com/uncategorized/2008/12/utorrents-switch-to-udp-and-why-the-sky-isnt-falling/)
+
+On Bittorrent's DHT (Distributed Hash Table):
+
+- [How DHT clients bootstrap](http://stackoverflow.com/questions/1181301/how-does-a-dht-in-a-bittorent-client-get-bootstrapped)
+- [peers from magnet link](http://stackoverflow.com/questions/15211285/how-to-get-the-first-peer-from-a-torrent-magnet-link)
+
+On writing Bittorrent Client&servers:
+
+- [how-to-write-a-bittorrent client](http://www.kristenwidman.com/blog/33/how-to-write-a-bittorrent-client-part-1/)
+- [how-to-make your own tracker](http://justrambling.amereservant.com/2011/06/08/how-to-make-your-own-bittorrent-torrent-tracker/)
+- [tracker-request/response params](https://wiki.theory.org/BitTorrentSpecification#Tracker_Request_Parameters)
+
+Existing Bittorrent Clients:
+- [official docs](https://help.ubuntu.com/community/BitTorrent)
+- [ubuntu ask]()
+
+On Dropbox:
 
 - [How Dropbox works](http://stackoverflow.com/questions/185533/how-does-the-dropbox-mac-client-work)
