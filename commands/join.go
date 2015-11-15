@@ -41,28 +41,6 @@ var Join = cli.Command{
 		}
 
 		//
-		// Exchange Service
-		//
-		exchange, err := services.NewDeluge()
-		if err != nil {
-			log.Fatalf("Failed to create exchange service: %s", err)
-		}
-
-		log.Printf("Starting Deluge BitTorrent daemon...")
-		err = exchange.Start()
-		if err != nil {
-			log.Fatalf("Failed to start exchange service: %s", err)
-		}
-
-		defer func() {
-			log.Printf("Stopping Exchange service...")
-			err := exchange.Stop()
-			if err != nil {
-				log.Fatalf("Failed to stop exchange: %s", err)
-			}
-		}()
-
-		//
 		// VPN service
 		//
 
@@ -101,6 +79,33 @@ var Join = cli.Command{
 			}
 
 			log.Fatalf("Failed to join network: %s", err)
+		}
+
+		//
+		// Exchange Service
+		//
+		exchange, err := services.NewDeluge(ip)
+		if err != nil {
+			log.Fatalf("Failed to create exchange service: %s", err)
+		}
+
+		log.Printf("Starting Deluge BitTorrent daemon...")
+		err = exchange.Start()
+		if err != nil {
+			log.Fatalf("Failed to start exchange service: %s", err)
+		}
+
+		defer func() {
+			log.Printf("Stopping Exchange service...")
+			err := exchange.Stop()
+			if err != nil {
+				log.Fatalf("Failed to stop exchange: %s", err)
+			}
+		}()
+
+		err = exchange.Benchmark()
+		if err != nil {
+			log.Fatalf("Failed to benchmark: %s", err)
 		}
 
 		//
@@ -162,7 +167,8 @@ var Join = cli.Command{
 			log.Fatalf("Failed to start multicasting: %s", err)
 		}
 
-		log.Printf("Gossip is up and running!")
+		log.Printf("Gossip is up and running, starting exchange benchmark...")
+
 		<-exit //block until signal
 
 	},

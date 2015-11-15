@@ -109,7 +109,6 @@ On writing Bittorrent Client&servers:
 
 Existing Bittorrent Clients:
 - [official docs](https://help.ubuntu.com/community/BitTorrent)
-- [ubuntu ask]()
 
 On Dropbox:
 
