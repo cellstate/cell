@@ -18,8 +18,11 @@ import (
 	"github.com/anacrolix/torrent/bencode"
 )
 
-func NewDeluge(ip net.IP) (Exchange, error) {
-	return &delugeProcess{ip: ip}, nil
+func NewDeluge(gossip Gossip, ip net.IP) (Exchange, error) {
+	return &delugeProcess{
+		gossip: gossip,
+		ip:     ip,
+	}, nil
 }
 
 type peer struct {
@@ -32,13 +35,14 @@ type Exchange interface {
 	Start() error
 	Stop() error
 
-	Benchmark() error
+	Benchmark() (string, error)
 
 	Pull(id string) error
 }
 
 type delugeProcess struct {
-	ip net.IP
+	gossip Gossip
+	ip     net.IP
 	*os.Process
 }
 
@@ -82,26 +86,25 @@ func (d *delugeProcess) writeCompactPeers(b *bytes.Buffer, peer []peer) (err err
 }
 
 //@todo implement
-func (d *delugeProcess) Benchmark() error {
+func (d *delugeProcess) Benchmark() (string, error) {
 
 	//generate a quasi-large file
 	f, err := ioutil.TempFile("", "cell_bench_")
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	limit := int64(100000000)
 	log.Printf("created tmp file %s, filling with '%d' random bytes...", f.Name(), limit)
 	size, err := io.Copy(f, io.LimitReader(rand.Reader, limit))
 	if err != nil {
-		return err
+		return "", err
 	}
 
+	//starts a super minimal bittorrent tracker that only returns peers
 	tbind := ":9000"
 	go func() {
-
 		torrents := map[string]map[string]peer{}
-
 		log.Printf("Starting tracker on '%s'...", tbind)
 		err = http.ListenAndServe(tbind, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 
@@ -201,34 +204,29 @@ func (d *delugeProcess) Benchmark() error {
 	cmd.Stderr = os.Stderr
 	err = cmd.Run()
 	if err != nil {
-		return err
-	}
-
-	//add to a torrent client, announcing itself to the tracker
-	dir := filepath.Dir(f.Name())
-	log.Printf("Adding .torrent file '%s' with dir '%s' to client...", tpath, dir)
-	cmd = exec.Command("deluge-console", "add", tpath, "-p", dir)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	err = cmd.Run()
-	if err != nil {
-		return err
+		return "", err
 	}
 
 	//publish directory with torrent file on a simple file server
 	bind := ":8080"
-	log.Printf("Publishing torrent file at: 'http://%s%s/%s'", d.ip.String(), bind, filepath.Base(tpath))
+	tdir := filepath.Dir(f.Name())
+	turl := fmt.Sprintf("http://%s%s/%s", d.ip.String(), bind, filepath.Base(tpath))
+	log.Printf("Publishing torrent file at: '%s'", turl)
 	go func() {
-		log.Fatal(http.ListenAndServe(bind, http.FileServer(http.Dir(dir))))
+		log.Fatal(http.ListenAndServe(bind, http.FileServer(http.Dir(tdir))))
 	}()
 
-	//make torrent available on a url
+	//add to a torrent client, announcing itself to the tracker
+	log.Printf("Adding .torrent file from url '%s' with dir '%s' to client...", turl, tdir)
+	cmd = exec.Command("deluge-console", "add", turl, "-p", tdir)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	err = cmd.Run()
+	if err != nil {
+		return turl, err
+	}
 
-	//publish availability of new torrent file using gossip
-
-	//anyone is able to download the torrent file from the private url
-
-	return nil
+	return turl, nil
 }
 
 func (d *delugeProcess) Pull(uri string) error {

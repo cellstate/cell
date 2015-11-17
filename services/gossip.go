@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"os/exec"
 )
@@ -19,6 +20,8 @@ type Gossip interface {
 	Stop() error
 	Join(addr string) error
 	Members() ([]*Member, error)
+
+	EmitTorrent(turl string) error
 }
 
 type SerfConf struct {
@@ -33,6 +36,20 @@ type serfProcess struct {
 	conf SerfConf
 
 	*os.Process
+}
+
+func (s *serfProcess) EmitTorrent(turl string) error {
+	purl, err := url.Parse(turl)
+	if err != nil {
+		return err
+	}
+
+	ename := "new_torrent"
+	cmd := exec.Command("serf", "event", ename, purl.String())
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	return cmd.Run()
 }
 
 func (s *serfProcess) Start() error {
