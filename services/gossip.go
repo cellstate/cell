@@ -53,7 +53,7 @@ func (s *serfProcess) EmitTorrent(turl string) error {
 }
 
 func (s *serfProcess) Start() error {
-	cmd := exec.Command("serf", "agent", fmt.Sprintf("-bind=%s", s.conf.Bind))
+	cmd := exec.Command("serf", "agent", fmt.Sprintf("-bind=%s", s.conf.Bind), "-event-handler=user:new_torrent=cell pull", "-log-level=debug")
 
 	//@todo find more elegant logging solution
 	cmd.Stdout = os.Stdout

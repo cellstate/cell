@@ -18,6 +18,7 @@ func main() {
 
 	app.Commands = []cli.Command{
 		commands.Join,
+		commands.Pull,
 	}
 
 	app.Run(os.Args)
