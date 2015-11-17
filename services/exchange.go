@@ -20,8 +20,11 @@ import (
 
 func NewDeluge(gossip Gossip, ip net.IP) (Exchange, error) {
 	return &delugeProcess{
-		gossip: gossip,
-		ip:     ip,
+		torrentPath: "/tmp",
+		trackerBind: ":9000",
+		filesBind:   ":8080",
+		gossip:      gossip,
+		ip:          ip,
 	}, nil
 }
 
@@ -36,18 +39,23 @@ type Exchange interface {
 	Stop() error
 
 	Benchmark() (string, error)
+	CreateLink(name, path string) (string, error)
+	SeedLink(turl, path string) error
 
 	Pull(id string) error
 }
 
 type delugeProcess struct {
-	gossip Gossip
-	ip     net.IP
+	torrentPath string
+	trackerBind string
+	filesBind   string
+	gossip      Gossip
+	ip          net.IP
 	*os.Process
 }
 
 func (d *delugeProcess) Start() error {
-	cmd := exec.Command("deluged", "-d", "-L", "info", "-i", d.ip.String())
+	cmd := exec.Command("deluged", "-d", "-i", d.ip.String())
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	err := cmd.Start()
@@ -56,57 +64,12 @@ func (d *delugeProcess) Start() error {
 	}
 
 	d.Process = cmd.Process
-	return nil
-}
-
-func (d *delugeProcess) writeCompactPeers(b *bytes.Buffer, peer []peer) (err error) {
-	for _, p := range peer {
-
-		ip4 := net.ParseIP(p.IP).To4()
-		log.Printf("ipv4: '% x' (%s)", ip4, ip4)
-		_, err = b.Write(ip4)
-		if err != nil {
-			return err
-		}
-
-		port, err := strconv.Atoi(p.Port)
-		if err != nil {
-			return err
-		}
-
-		portBytes := []byte{byte(port >> 8), byte(port)}
-
-		log.Printf("port: '% x' (%d)", portBytes, port)
-		_, err = b.Write(portBytes)
-		if err != nil {
-			return err
-		}
-	}
-	return err
-}
-
-//@todo implement
-func (d *delugeProcess) Benchmark() (string, error) {
-
-	//generate a quasi-large file
-	f, err := ioutil.TempFile("", "cell_bench_")
-	if err != nil {
-		return "", err
-	}
-
-	limit := int64(100000000)
-	log.Printf("created tmp file %s, filling with '%d' random bytes...", f.Name(), limit)
-	size, err := io.Copy(f, io.LimitReader(rand.Reader, limit))
-	if err != nil {
-		return "", err
-	}
 
 	//starts a super minimal bittorrent tracker that only returns peers
-	tbind := ":9000"
 	go func() {
 		torrents := map[string]map[string]peer{}
-		log.Printf("Starting tracker on '%s'...", tbind)
-		err = http.ListenAndServe(tbind, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		log.Printf("Starting tracker on '%s'...", d.trackerBind)
+		err = http.ListenAndServe(d.trackerBind, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 
 			//map[ipv6:[fe80::226:bbff:fe0a:e12b] info_hash:[?0FA??c??N???] left:[100000000] key:[B22982B1] event:[started] numwant:[200] compact:[1] no_peer_id:[1] peer_id:[-UM1870-{??qCzVB<ur] port:[40959] uploaded:[0] downloaded:[0] corrupt:[0]]
 			err := r.ParseForm()
@@ -196,32 +159,87 @@ func (d *delugeProcess) Benchmark() (string, error) {
 		}
 	}()
 
-	//create a private torrent file for it, use a public tracker for announce (transmission-create)
-	tpath := f.Name() + ".torrent"
-	log.Printf("Creating .torrent file of '%s' ('%d' bytes) at '%s'...", f.Name(), size, tpath)
-	cmd := exec.Command("transmission-create", "-p", fmt.Sprintf("-t=http://%s%s/announce", d.ip.String(), tbind), "-o", tpath, f.Name())
+	log.Printf("Torrent files can be downloaded at: '%s'", d.filesBind)
+	go func() {
+		log.Fatal(http.ListenAndServe(d.filesBind, http.FileServer(http.Dir(d.torrentPath))))
+	}()
+
+	return nil
+}
+
+func (d *delugeProcess) writeCompactPeers(b *bytes.Buffer, peer []peer) (err error) {
+	for _, p := range peer {
+
+		ip4 := net.ParseIP(p.IP).To4()
+		log.Printf("ipv4: '% x' (%s)", ip4, ip4)
+		_, err = b.Write(ip4)
+		if err != nil {
+			return err
+		}
+
+		port, err := strconv.Atoi(p.Port)
+		if err != nil {
+			return err
+		}
+
+		portBytes := []byte{byte(port >> 8), byte(port)}
+
+		log.Printf("port: '% x' (%d)", portBytes, port)
+		_, err = b.Write(portBytes)
+		if err != nil {
+			return err
+		}
+	}
+	return err
+}
+
+func (d *delugeProcess) CreateLink(name, path string) (string, error) {
+	tname := fmt.Sprintf("%s.torrent", name)
+	tpath := filepath.Join(d.torrentPath, tname)
+	log.Printf("Creating .torrent file of '%s' at '%s'...", path, tpath)
+	cmd := exec.Command("transmission-create", "-p", fmt.Sprintf("-t=http://%s%s/announce", d.ip.String(), d.trackerBind), "-o", tpath, path)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	err = cmd.Run()
+	err := cmd.Run()
 	if err != nil {
 		return "", err
 	}
 
-	//publish directory with torrent file on a simple file server
-	bind := ":8080"
-	tdir := filepath.Dir(f.Name())
-	turl := fmt.Sprintf("http://%s%s/%s", d.ip.String(), bind, filepath.Base(tpath))
-	log.Printf("Publishing torrent file at: '%s'", turl)
-	go func() {
-		log.Fatal(http.ListenAndServe(bind, http.FileServer(http.Dir(tdir))))
-	}()
+	return fmt.Sprintf("http://%s%s/%s", d.ip.String(), d.filesBind, tname), nil
+}
 
-	//add to a torrent client, announcing itself to the tracker
-	log.Printf("Adding .torrent file from url '%s' with dir '%s' to client...", turl, tdir)
-	cmd = exec.Command("deluge-console", "add", turl, "-p", tdir)
+func (d *delugeProcess) SeedLink(turl, path string) error {
+	log.Printf("Adding .torrent file from url '%s' with dir '%s' to client...", turl, path)
+	cmd := exec.Command("deluge-console", "add", turl, "-p", path)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	err = cmd.Run()
+	return cmd.Run()
+}
+
+//@todo implement
+func (d *delugeProcess) Benchmark() (string, error) {
+
+	//generate a quasi-large file
+	f, err := ioutil.TempFile("", "cell_bench_")
+	if err != nil {
+		return "", err
+	}
+
+	limit := int64(100000000)
+	log.Printf("created tmp file %s, filling with '%d' random bytes...", f.Name(), limit)
+	_, err = io.Copy(f, io.LimitReader(rand.Reader, limit))
+	if err != nil {
+		return "", err
+	}
+
+	//create a .torrent file and publish
+	turl, err := d.CreateLink(filepath.Base(f.Name()), f.Name())
+	if err != nil {
+		return "", err
+	}
+
+	//seed .torrent from
+	err = d.SeedLink(turl, filepath.Dir(f.Name()))
 	if err != nil {
 		return turl, err
 	}

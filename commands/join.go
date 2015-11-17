@@ -135,6 +135,28 @@ var Join = cli.Command{
 		}
 
 		//
+		// Storage Service
+		//
+		storage, err := services.NewGitServer(exchange, gossip, ip)
+		if err != nil {
+			log.Fatalf("Failed to create storage service: %s", err)
+		}
+
+		log.Printf("Starting Deluge BitTorrent daemon...")
+		err = storage.Start()
+		if err != nil {
+			log.Fatalf("Failed to start storage service: %s", err)
+		}
+
+		defer func() {
+			log.Printf("Stopping storage service...")
+			err := storage.Stop()
+			if err != nil {
+				log.Fatalf("Failed to stop storage: %s", err)
+			}
+		}()
+
+		//
 		// Discovery service
 		//
 

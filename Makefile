@@ -5,7 +5,7 @@ run: build
 	export `cat ./secrets.env`; docker run --rm -it \
 		--device=/dev/net/tun \
 		--cap-add=NET_ADMIN \
-			cellstate/cell --token=$$ZEROTIER_TOKEN join e5cd7a9e1c266442
+			cellstate/cell --token=$$ZEROTIER_TOKEN join e5cd7a9e1cff3ff0
 
 deps:
 	rm -fr vendor

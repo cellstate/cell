@@ -3,7 +3,6 @@ package commands
 import (
 	"bytes"
 	"io"
-	"io/ioutil"
 	"log"
 	"os"
 	"os/exec"
@@ -22,11 +21,10 @@ var Pull = cli.Command{
 			log.Fatalf("failed to read Stdin: %s", err)
 		}
 
+		//there is a new torrent in the network
+		//@todo how to determine the location of the torrent directory
 		turl := buff.String()
-		tdir, err := ioutil.TempDir("", "cell_bench_")
-		if err != nil {
-			log.Fatal(err)
-		}
+		tdir := "/tmp"
 
 		log.Printf("Adding .torrent file from url '%s' with dir '%s' to client...", turl, tdir)
 		cmd := exec.Command("deluge-console", "add", turl, "-p", tdir)
